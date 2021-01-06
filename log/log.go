@@ -145,10 +145,12 @@ func (logger *StdLogger) output(l Level, msg string) {
 
 func (logger *StdLogger) Fatalf(format string, args ...interface{}) {
 	logger.output(FatalLevel, fmt.Sprintf(format, args...))
+	os.Exit(1)
 }
 
 func (logger *StdLogger) Fatalln(args ...interface{}) {
-	logger.output(WarningLevel, fmt.Sprintln(args...))
+	logger.output(FatalLevel, fmt.Sprint(args...))
+	os.Exit(1)
 }
 
 func (logger *StdLogger) Errorf(format string, args ...interface{}) {
@@ -156,7 +158,7 @@ func (logger *StdLogger) Errorf(format string, args ...interface{}) {
 }
 
 func (logger *StdLogger) Errorln(args ...interface{}) {
-	logger.output(ErrorLevel, fmt.Sprintln(args...))
+	logger.output(ErrorLevel, fmt.Sprint(args...))
 }
 
 func (logger *StdLogger) Warnf(format string, args ...interface{}) {
@@ -164,7 +166,7 @@ func (logger *StdLogger) Warnf(format string, args ...interface{}) {
 }
 
 func (logger *StdLogger) Warnln(args ...interface{}) {
-	logger.output(WarningLevel, fmt.Sprintln(args...))
+	logger.output(WarningLevel, fmt.Sprint(args...))
 }
 
 func (logger *StdLogger) Infof(format string, args ...interface{}) {
@@ -172,7 +174,7 @@ func (logger *StdLogger) Infof(format string, args ...interface{}) {
 }
 
 func (logger *StdLogger) Infoln(args ...interface{}) {
-	logger.output(InfoLevel, fmt.Sprintln(args...))
+	logger.output(InfoLevel, fmt.Sprint(args...))
 }
 
 func (logger *StdLogger) Tracef(format string, args ...interface{}) {
@@ -180,5 +182,5 @@ func (logger *StdLogger) Tracef(format string, args ...interface{}) {
 }
 
 func (logger *StdLogger) Traceln(args ...interface{}) {
-	logger.output(TraceLevel, fmt.Sprintln(args...))
+	logger.output(TraceLevel, fmt.Sprint(args...))
 }
