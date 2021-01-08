@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/urfave/cli/v2"
+	"go/format"
+	"go/parser"
+	"go/token"
 	"html/template"
 	"io/ioutil"
 	"os"
@@ -15,6 +18,10 @@ import (
 const (
 	DefaultTpl = `
 package _
+
+import (
+	"fmt"
+)
 
 var (
 	name = "{{.Name}}"
@@ -38,7 +45,8 @@ type Context struct {
 	Name, AbsPath, Module, GoPath string
 	IsInGoPath, IsNew             bool
 	TplFile                       string
-	TplSource                     string
+	TplSource                     []byte
+	TplInfo                       *TplInfo
 }
 
 func Initial(c *cli.Context) (*Context, error) {
@@ -67,6 +75,10 @@ func Initial(c *cli.Context) (*Context, error) {
 	if err != nil {
 		return nil, err
 	}
+	err = parseTpl(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return ctx, nil
 }
 
@@ -87,7 +99,7 @@ func loadTpl(c *cli.Context, ctx *Context) error {
 		}
 	}
 	ctx.IsNew = isNew
-	ctx.TplSource = string(bs)
+	ctx.TplSource = bs
 	return nil
 }
 
@@ -102,4 +114,28 @@ func createDefaultTpl(ctx *Context) ([]byte, error) {
 		return nil, err
 	}
 	return tpl.Bytes(), nil
+}
+
+func parseTpl(ctx *Context) error {
+	var (
+		tplInfo = new(TplInfo)
+		fileSet = token.NewFileSet()
+	)
+	f, err := parser.ParseFile(fileSet, "", ctx.TplSource, parser.ParseComments)
+	if err != nil {
+		return err
+	}
+
+	// get imports code
+	for _, spec := range f.Imports {
+		// get code block
+		var buffer bytes.Buffer
+		if err = format.Node(&buffer, fileSet, spec); err != nil {
+			return err
+		}
+		tplInfo.Imports = append(tplInfo.Imports, buffer.String())
+	}
+
+	ctx.TplInfo = tplInfo
+	return nil
 }
