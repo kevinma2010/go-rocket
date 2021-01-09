@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/fatih/structtag"
 	"github.com/urfave/cli/v2"
+	"go/ast"
 	"go/format"
 	"go/parser"
 	"go/token"
 	"html/template"
 	"io/ioutil"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,18 +26,32 @@ import (
 	"fmt"
 )
 
+const (
+	port = 3390
+)
+
 var (
+	// name server name
 	name = "{{.Name}}"
 )
 
 type (
+	// GreeterApi api group
+	// @cccc
 	GreeterApi interface {
-		SayHello(SayHelloArg) SayHelloReply
+		// SayHello say hello api
+		SayHello(int,SayHelloApiArg) SayHelloApiReply
 	}
-	SayHelloArg struct {
-		Name string
+	// SayHelloArg say hello api arg
+	// @aaaa
+	SayHelloApiArg struct {
+		// Name say hello name
+		Name string ` + "`validator:\"required\" json:\"name\"`" + `
 	}
-	SayHelloReply struct {
+	// SayHelloReply say hello api reply
+	// @bbbb
+	SayHelloApiReply struct {
+		// Message say hello reply message
 		Message string
 	}
 )
@@ -120,22 +137,222 @@ func parseTpl(ctx *Context) error {
 	var (
 		tplInfo = new(TplInfo)
 		fileSet = token.NewFileSet()
+		err     error
 	)
-	f, err := parser.ParseFile(fileSet, "", ctx.TplSource, parser.ParseComments)
-	if err != nil {
+	var f *ast.File
+	if f, err = parser.ParseFile(fileSet, "", ctx.TplSource, parser.ParseComments); err != nil {
 		return err
 	}
 
 	// get imports code
-	for _, spec := range f.Imports {
-		// get code block
-		var buffer bytes.Buffer
-		if err = format.Node(&buffer, fileSet, spec); err != nil {
-			return err
-		}
-		tplInfo.Imports = append(tplInfo.Imports, buffer.String())
+	if tplInfo.Imports, err = collectImports(ctx, f, fileSet); err != nil {
+		return err
+	}
+
+	// get structs code
+	if tplInfo.Structs, err = collectStruts(ctx, f); err != nil {
+		return err
+	}
+
+	if tplInfo.Values, err = collectValues(ctx, f); err != nil {
+		return err
+	}
+
+	if tplInfo.Interfaces, err = collectInterfaces(ctx, f); err != nil {
+		return err
 	}
 
 	ctx.TplInfo = tplInfo
 	return nil
+}
+
+func collectImports(ctx *Context, file *ast.File, fileSet *token.FileSet) ([]string, error) {
+	log.Println("collect imports")
+	var imports []string
+	for _, spec := range file.Imports {
+		// get code block
+		var buffer bytes.Buffer
+		if err := format.Node(&buffer, fileSet, spec); err != nil {
+			return nil, err
+		}
+		imports = append(imports, buffer.String())
+	}
+	return imports, nil
+}
+
+func collectStruts(ctx *Context, file *ast.File) ([]*Struct, error) {
+	var structs []*Struct
+
+	ast.Inspect(file, func(node ast.Node) bool {
+		log.Println("collect structs")
+		genDecl, ok := node.(*ast.GenDecl)
+		if !ok {
+			return true
+		}
+		for _, spec := range genDecl.Specs {
+			var struc = new(Struct)
+			switch t := spec.(type) {
+			case *ast.TypeSpec:
+				if t.Type == nil {
+					continue
+				}
+
+				// 结构体名称
+				struc.Name = t.Name.Name
+
+				// 结构体注释
+				if t.Doc != nil {
+					struc.Doc = t.Doc.Text()
+				}
+
+				// 解析字段
+				var typ *ast.StructType
+				typ, ok = t.Type.(*ast.StructType)
+				if !ok {
+					continue
+				}
+				if typ.Fields != nil {
+					var structField = new(StructField)
+					for _, fieldSpec := range typ.Fields.List {
+						// 匿名字段
+						structField.Anonymous = len(fieldSpec.Names) == 0
+						if !structField.Anonymous {
+							structField.Name = fieldSpec.Names[0].Name
+						}
+
+						// 字段注释
+						if fieldSpec.Doc != nil {
+							structField.Doc = fieldSpec.Doc.Text()
+						}
+
+						// 字段标签
+						if fieldSpec.Tag != nil && len(fieldSpec.Tag.Value) > 2 {
+							var (
+								err      error
+								tagValue = fieldSpec.Tag.Value[1 : len(fieldSpec.Tag.Value)-1]
+							)
+							structField.Tags, err = structtag.Parse(tagValue)
+							if err != nil {
+								log.Fatalf("parse tag failure, field: [%s %s], tag: [%s], reason: %s",
+									struc.Name, structField.Name, tagValue, err)
+							}
+						}
+					}
+					struc.Fields = append(struc.Fields, structField)
+				}
+			default:
+				continue
+			}
+			structs = append(structs, struc)
+		}
+		return true
+	})
+
+	return structs, nil
+}
+
+func collectValues(ctx *Context, file *ast.File) ([]*Value, error) {
+	var values []*Value
+
+	ast.Inspect(file, func(node ast.Node) bool {
+		log.Println("collect values")
+		genDecl, ok := node.(*ast.GenDecl)
+		if !ok {
+			return true
+		}
+		for _, spec := range genDecl.Specs {
+			var val = new(Value)
+			switch t := spec.(type) {
+			case *ast.ValueSpec:
+				val.Name = t.Names[0].Name
+
+				if t.Doc != nil {
+					val.Doc = t.Doc.Text()
+				}
+
+				var v *ast.BasicLit
+				v, ok = t.Values[0].(*ast.BasicLit)
+				if !ok {
+					continue
+				}
+				val.Kind = strings.ToLower(v.Kind.String())
+				val.Val = v.Value
+				if val.Kind == "string" && len(val.Val) > 2 {
+					val.Val = val.Val[1 : len(val.Val)-1]
+				}
+			default:
+				continue
+			}
+			values = append(values, val)
+		}
+		return true
+	})
+
+	return values, nil
+}
+
+func collectInterfaces(ctx *Context, file *ast.File) ([]*Interface, error) {
+	var interfaces []*Interface
+	ast.Inspect(file, func(node ast.Node) bool {
+		log.Println("collect interfaces")
+		genDecl, ok := node.(*ast.GenDecl)
+		if !ok {
+			return true
+		}
+		for _, spec := range genDecl.Specs {
+			var inf = new(Interface)
+			switch t := spec.(type) {
+			case *ast.TypeSpec:
+				if t.Type == nil {
+					continue
+				}
+				// 接口名称
+				inf.Name = t.Name.Name
+
+				// 接口注释
+				if t.Doc != nil {
+					inf.Doc = t.Doc.Text()
+				}
+
+				// 解析字段
+				var typ *ast.InterfaceType
+				typ, ok = t.Type.(*ast.InterfaceType)
+				if !ok {
+					continue
+				}
+				if typ.Methods != nil {
+					var fn = new(Function)
+					for _, fnSpec := range typ.Methods.List {
+						// 匿名函数
+						fn.Anonymous = len(fnSpec.Names) == 0
+						if !fn.Anonymous {
+							fn.Name = fnSpec.Names[0].Name
+						}
+
+						// 字段注释
+						if fnSpec.Doc != nil {
+							fn.Doc = fnSpec.Doc.Text()
+						}
+						switch f := fnSpec.Type.(type) {
+						case *ast.FuncType:
+							// 处理 params
+							if f.Params != nil {
+								for _, t := range f.Params.List {
+									log.Println(t)
+								}
+							}
+							// 处理 result
+						default:
+							continue
+						}
+					}
+				}
+			default:
+				continue
+			}
+			interfaces = append(interfaces, inf)
+		}
+		return true
+	})
+	return interfaces, nil
 }
