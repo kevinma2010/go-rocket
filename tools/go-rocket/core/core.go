@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/fatih/structtag"
-	"github.com/urfave/cli/v2"
 	"go/ast"
 	"go/format"
 	"go/parser"
@@ -16,40 +14,34 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/fatih/structtag"
+	"github.com/urfave/cli/v2"
 )
 
 const (
 	DefaultTpl = `
-package _
-
-import (
-	"fmt"
-)
-
-const (
-	port = 3390
-)
+package main
 
 var (
 	// name server name
 	name = "{{.Name}}"
+	// port server port
+	port = 5051
 )
 
 type (
 	// GreeterApi api group
-	// @cccc
 	GreeterApi interface {
 		// SayHello say hello api
 		SayHello(int,SayHelloApiArg) SayHelloApiReply
 	}
 	// SayHelloArg say hello api arg
-	// @aaaa
 	SayHelloApiArg struct {
 		// Name say hello name
-		Name string ` + "`validator:\"required\" json:\"name\"`" + `
+		Name string
 	}
 	// SayHelloReply say hello api reply
-	// @bbbb
 	SayHelloApiReply struct {
 		// Message say hello reply message
 		Message string
@@ -64,6 +56,43 @@ type Context struct {
 	TplFile                       string
 	TplSource                     []byte
 	TplInfo                       *TplInfo
+}
+
+type TplInfo struct {
+	Imports    []string
+	Structs    []*Struct
+	Values     []*Value
+	Interfaces []*Interface
+}
+
+type Interface struct {
+	Name, Doc string
+	Methods   []*Function
+}
+
+type Function struct {
+	Name, Doc string
+	Anonymous bool
+	Params    []string
+	Results   []string
+}
+
+type Struct struct {
+	Name, Doc string
+	Fields    []*StructField
+}
+
+type StructField struct {
+	Name, Doc string
+	Anonymous bool
+	Tags      *structtag.Tags
+}
+
+type Value struct {
+	Name string
+	Kind string
+	Val  string
+	Doc  string
 }
 
 func Initial(c *cli.Context) (*Context, error) {
@@ -203,40 +232,14 @@ func collectStruts(ctx *Context, file *ast.File) ([]*Struct, error) {
 					struc.Doc = t.Doc.Text()
 				}
 
-				// 解析字段
+				// 解析字段列表
 				var typ *ast.StructType
 				typ, ok = t.Type.(*ast.StructType)
 				if !ok {
 					continue
 				}
 				if typ.Fields != nil {
-					var structField = new(StructField)
-					for _, fieldSpec := range typ.Fields.List {
-						// 匿名字段
-						structField.Anonymous = len(fieldSpec.Names) == 0
-						if !structField.Anonymous {
-							structField.Name = fieldSpec.Names[0].Name
-						}
-
-						// 字段注释
-						if fieldSpec.Doc != nil {
-							structField.Doc = fieldSpec.Doc.Text()
-						}
-
-						// 字段标签
-						if fieldSpec.Tag != nil && len(fieldSpec.Tag.Value) > 2 {
-							var (
-								err      error
-								tagValue = fieldSpec.Tag.Value[1 : len(fieldSpec.Tag.Value)-1]
-							)
-							structField.Tags, err = structtag.Parse(tagValue)
-							if err != nil {
-								log.Fatalf("parse tag failure, field: [%s %s], tag: [%s], reason: %s",
-									struc.Name, structField.Name, tagValue, err)
-							}
-						}
-					}
-					struc.Fields = append(struc.Fields, structField)
+					struc.Fields = collectStructFields(struc.Name, typ.Fields)
 				}
 			default:
 				continue
@@ -247,6 +250,38 @@ func collectStruts(ctx *Context, file *ast.File) ([]*Struct, error) {
 	})
 
 	return structs, nil
+}
+
+func collectStructFields(structName string, fields *ast.FieldList) []*StructField {
+	var structFields []*StructField
+	for _, fieldSpec := range fields.List {
+		var structField = new(StructField)
+		// 匿名字段
+		structField.Anonymous = len(fieldSpec.Names) == 0
+		if !structField.Anonymous {
+			structField.Name = fieldSpec.Names[0].Name
+		}
+
+		// 字段注释
+		if fieldSpec.Doc != nil {
+			structField.Doc = fieldSpec.Doc.Text()
+		}
+
+		// 字段标签
+		if fieldSpec.Tag != nil && len(fieldSpec.Tag.Value) > 2 {
+			var (
+				err      error
+				tagValue = fieldSpec.Tag.Value[1 : len(fieldSpec.Tag.Value)-1]
+			)
+			structField.Tags, err = structtag.Parse(tagValue)
+			if err != nil {
+				log.Fatalf("parse tag failure, field: [%s %s], tag: [%s], reason: %s",
+					structName, structField.Name, tagValue, err)
+			}
+		}
+		structFields = append(structFields, structField)
+	}
+	return structFields
 }
 
 func collectValues(ctx *Context, file *ast.File) ([]*Value, error) {
@@ -310,67 +345,14 @@ func collectInterfaces(ctx *Context, file *ast.File) ([]*Interface, error) {
 					inf.Doc = t.Doc.Text()
 				}
 
-				// 解析字段
+				// 解析函数列表
 				var typ *ast.InterfaceType
 				typ, ok = t.Type.(*ast.InterfaceType)
 				if !ok {
 					continue
 				}
 				if typ.Methods != nil {
-					for _, fnSpec := range typ.Methods.List {
-						var fn = new(Function)
-						// 匿名函数
-						fn.Anonymous = len(fnSpec.Names) == 0
-						if !fn.Anonymous {
-							fn.Name = fnSpec.Names[0].Name
-						}
-
-						// 字段注释
-						if fnSpec.Doc != nil {
-							fn.Doc = fnSpec.Doc.Text()
-						}
-						switch f := fnSpec.Type.(type) {
-						case *ast.FuncType:
-							// 处理 params
-							if f.Params != nil {
-								var params []string
-								for _, t := range f.Params.List {
-									var expr = t.Type
-									if e, ok := t.Type.(*ast.StarExpr); ok {
-										expr = e.X
-									}
-									switch ft := expr.(type) {
-									case *ast.Ident:
-										params = append(params, ft.Name)
-									default:
-										continue
-									}
-								}
-								fn.Params = params
-							}
-
-							// 处理 result
-							if f.Results != nil {
-								var results []string
-								for _, t := range f.Results.List {
-									var expr = t.Type
-									if e, ok := t.Type.(*ast.StarExpr); ok {
-										expr = e.X
-									}
-									switch ft := expr.(type) {
-									case *ast.Ident:
-										results = append(results, ft.Name)
-									default:
-										continue
-									}
-								}
-								fn.Results = results
-							}
-						default:
-							continue
-						}
-						inf.Methods = append(inf.Methods, fn)
-					}
+					inf.Methods = collectInterfaceMethods(typ.Methods)
 				}
 			default:
 				continue
@@ -380,4 +362,54 @@ func collectInterfaces(ctx *Context, file *ast.File) ([]*Interface, error) {
 		return true
 	})
 	return interfaces, nil
+}
+
+func collectInterfaceMethods(list *ast.FieldList) []*Function {
+	var methods []*Function
+	for _, fnSpec := range list.List {
+		var fn = new(Function)
+		// 匿名函数
+		fn.Anonymous = len(fnSpec.Names) == 0
+		if !fn.Anonymous {
+			fn.Name = fnSpec.Names[0].Name
+		}
+
+		// 字段注释
+		if fnSpec.Doc != nil {
+			fn.Doc = fnSpec.Doc.Text()
+		}
+		switch f := fnSpec.Type.(type) {
+		case *ast.FuncType:
+			// 处理 params
+			if f.Params != nil {
+				fn.Params = collectFuncFields(f.Params)
+			}
+
+			// 处理 result
+			if f.Results != nil {
+				fn.Results = collectFuncFields(f.Results)
+			}
+		default:
+			continue
+		}
+		methods = append(methods, fn)
+	}
+	return methods
+}
+
+func collectFuncFields(list *ast.FieldList) []string {
+	var results []string
+	for _, t := range list.List {
+		var expr = t.Type
+		if e, ok := t.Type.(*ast.StarExpr); ok {
+			expr = e.X
+		}
+		switch ft := expr.(type) {
+		case *ast.Ident:
+			results = append(results, ft.Name)
+		default:
+			continue
+		}
+	}
+	return results
 }

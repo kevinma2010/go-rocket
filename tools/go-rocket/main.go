@@ -2,11 +2,12 @@ package main
 
 import (
 	"fmt"
-	"github.com/kevinma2010/go-rocket/tools/go-rocket/core"
 	"log"
 	"os"
 	"runtime"
 
+	"github.com/kevinma2010/go-rocket/tools/go-rocket/core"
+	initial "github.com/kevinma2010/go-rocket/tools/go-rocket/init"
 	"github.com/urfave/cli/v2"
 )
 
@@ -31,7 +32,11 @@ func main() {
 			Name:  "init",
 			Usage: "initial template file",
 			Action: func(c *cli.Context) error {
-				return nil
+				ctx, err := core.Initial(c)
+				if err != nil {
+					return err
+				}
+				return initial.Main(c, ctx)
 			},
 		},
 		{
