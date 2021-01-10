@@ -167,7 +167,6 @@ func parseTpl(ctx *Context) error {
 }
 
 func collectImports(ctx *Context, file *ast.File, fileSet *token.FileSet) ([]string, error) {
-	log.Println("collect imports")
 	var imports []string
 	for _, spec := range file.Imports {
 		// get code block
@@ -184,7 +183,6 @@ func collectStruts(ctx *Context, file *ast.File) ([]*Struct, error) {
 	var structs []*Struct
 
 	ast.Inspect(file, func(node ast.Node) bool {
-		log.Println("collect structs")
 		genDecl, ok := node.(*ast.GenDecl)
 		if !ok {
 			return true
@@ -255,7 +253,6 @@ func collectValues(ctx *Context, file *ast.File) ([]*Value, error) {
 	var values []*Value
 
 	ast.Inspect(file, func(node ast.Node) bool {
-		log.Println("collect values")
 		genDecl, ok := node.(*ast.GenDecl)
 		if !ok {
 			return true
@@ -294,7 +291,6 @@ func collectValues(ctx *Context, file *ast.File) ([]*Value, error) {
 func collectInterfaces(ctx *Context, file *ast.File) ([]*Interface, error) {
 	var interfaces []*Interface
 	ast.Inspect(file, func(node ast.Node) bool {
-		log.Println("collect interfaces")
 		genDecl, ok := node.(*ast.GenDecl)
 		if !ok {
 			return true
@@ -321,8 +317,8 @@ func collectInterfaces(ctx *Context, file *ast.File) ([]*Interface, error) {
 					continue
 				}
 				if typ.Methods != nil {
-					var fn = new(Function)
 					for _, fnSpec := range typ.Methods.List {
+						var fn = new(Function)
 						// 匿名函数
 						fn.Anonymous = len(fnSpec.Names) == 0
 						if !fn.Anonymous {
@@ -337,14 +333,43 @@ func collectInterfaces(ctx *Context, file *ast.File) ([]*Interface, error) {
 						case *ast.FuncType:
 							// 处理 params
 							if f.Params != nil {
+								var params []string
 								for _, t := range f.Params.List {
-									log.Println(t)
+									var expr = t.Type
+									if e, ok := t.Type.(*ast.StarExpr); ok {
+										expr = e.X
+									}
+									switch ft := expr.(type) {
+									case *ast.Ident:
+										params = append(params, ft.Name)
+									default:
+										continue
+									}
 								}
+								fn.Params = params
 							}
+
 							// 处理 result
+							if f.Results != nil {
+								var results []string
+								for _, t := range f.Results.List {
+									var expr = t.Type
+									if e, ok := t.Type.(*ast.StarExpr); ok {
+										expr = e.X
+									}
+									switch ft := expr.(type) {
+									case *ast.Ident:
+										results = append(results, ft.Name)
+									default:
+										continue
+									}
+								}
+								fn.Results = results
+							}
 						default:
 							continue
 						}
+						inf.Methods = append(inf.Methods, fn)
 					}
 				}
 			default:
