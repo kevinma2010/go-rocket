@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/kevinma2010/go-rocket/tools/go-rocket/gen"
 	"log"
 	"os"
 	"runtime"
@@ -49,15 +50,22 @@ func main() {
 		{
 			Name:  "gen",
 			Usage: "generate code from template",
-			Action: func(c *cli.Context) error {
-				serverCtx, err := core.InitialServer(c)
-				if err != nil {
-					return err
+			Action: func(c *cli.Context) (err error) {
+				var (
+					serverCtx *core.Context
+					modelCtx  *core.Context
+				)
+				if serverCtx, err = core.InitialServer(c); err != nil {
+					return
 				}
-				log.Println(serverCtx)
-				return nil
+				if err = gen.NewServerGenerator(c, serverCtx).Gen(); err != nil {
+					return
+				}
+				if err = gen.NewModelGenerator(c, modelCtx).Gen(); err != nil {
+					return
+				}
+				return
 			},
-			Subcommands: []*cli.Command{},
 		},
 		{
 			Name:  "build",
