@@ -19,40 +19,10 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-const (
-	DefaultTpl = `
-package main
-
-var (
-	// name server name
-	name = "{{.Name}}"
-	// port server port
-	port = 5051
-)
-
-type (
-	// GreeterApi api group
-	GreeterApi interface {
-		// SayHello say hello api
-		SayHello(int,SayHelloApiArg) SayHelloApiReply
-	}
-	// SayHelloArg say hello api arg
-	SayHelloApiArg struct {
-		// Name say hello name
-		Name string
-	}
-	// SayHelloReply say hello api reply
-	SayHelloApiReply struct {
-		// Message say hello reply message
-		Message string
-	}
-)
-`
-)
-
 type Context struct {
 	Name, AbsPath, Module, GoPath string
 	IsInGoPath, IsNew             bool
+	Tpl                           string
 	TplFile                       string
 	TplSource                     []byte
 	TplInfo                       *TplInfo
@@ -95,7 +65,15 @@ type Value struct {
 	Doc  string
 }
 
-func Initial(c *cli.Context) (*Context, error) {
+func InitialServer(c *cli.Context) (*Context, error) {
+	return initial(c, ServerTplFile, DefaultServerTpl)
+}
+
+func InitialModel(c *cli.Context) (*Context, error) {
+	return initial(c, ModelTplFile, DefaultModelTpl)
+}
+
+func initial(c *cli.Context, tplFile, defaultTpl string) (*Context, error) {
 	absPath, err := filepath.Abs("./")
 	if err != nil {
 		return nil, errors.New("get project absolute path failure, reason: " + err.Error())
@@ -106,7 +84,8 @@ func Initial(c *cli.Context) (*Context, error) {
 	ctx := &Context{
 		Name:    absPath[strings.LastIndex(absPath, "/")+1:],
 		AbsPath: absPath,
-		TplFile: "_tpl.go",
+		Tpl:     defaultTpl,
+		TplFile: tplFile,
 	}
 	ctx.Module = ctx.Name
 	ctx.GoPath, _ = os.LookupEnv("GOPATH")
@@ -117,7 +96,7 @@ func Initial(c *cli.Context) (*Context, error) {
 		ctx.Module = absPath[srcIdx+len(Src):]
 	}
 
-	err = loadTpl(c, ctx)
+	err = loadTpl(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +107,7 @@ func Initial(c *cli.Context) (*Context, error) {
 	return ctx, nil
 }
 
-func loadTpl(c *cli.Context, ctx *Context) error {
+func loadTpl(ctx *Context) error {
 	var isNew bool
 	bs, err := ioutil.ReadFile(ctx.TplFile)
 	if err != nil {
@@ -150,7 +129,7 @@ func loadTpl(c *cli.Context, ctx *Context) error {
 }
 
 func createDefaultTpl(ctx *Context) ([]byte, error) {
-	t, err := template.New("create_tpl").Parse(DefaultTpl)
+	t, err := template.New("create_tpl").Parse(ctx.Tpl)
 	if err != nil {
 		return nil, err
 	}

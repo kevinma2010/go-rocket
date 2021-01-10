@@ -32,22 +32,29 @@ func main() {
 			Name:  "init",
 			Usage: "initial template file",
 			Action: func(c *cli.Context) error {
-				ctx, err := core.Initial(c)
-				if err != nil {
+				var (
+					serverCtx *core.Context
+					modelCtx  *core.Context
+					err       error
+				)
+				if serverCtx, err = core.InitialServer(c); err != nil {
 					return err
 				}
-				return initial.Main(c, ctx)
+				if modelCtx, err = core.InitialModel(c); err != nil {
+					return err
+				}
+				return initial.Main(c, serverCtx, modelCtx)
 			},
 		},
 		{
 			Name:  "gen",
 			Usage: "generate code from template",
 			Action: func(c *cli.Context) error {
-				ctx, err := core.Initial(c)
+				serverCtx, err := core.InitialServer(c)
 				if err != nil {
 					return err
 				}
-				log.Println(ctx)
+				log.Println(serverCtx)
 				return nil
 			},
 			Subcommands: []*cli.Command{},

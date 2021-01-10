@@ -7,7 +7,17 @@ import (
 	"os"
 )
 
-func Main(c *cli.Context, ctx *core.Context) error {
+func Main(c *cli.Context, serverCtx, modelCtx *core.Context) error {
+	if err := writeFile(serverCtx); err != nil {
+		return err
+	}
+	if err := writeFile(modelCtx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeFile(ctx *core.Context) error {
 	// write template file
 	f, err := os.OpenFile(ctx.TplFile, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, os.ModePerm)
 	if err != nil {
